@@ -77,9 +77,83 @@ public class BandcampAudioSourceManager implements AudioSourceManager, HttpConfi
     if (matcher.matches()) {
       return new UrlInfo(url, matcher.group(1), "album".equals(matcher.group(2)));
     } else {
+      String scrape = scrapeBandcampUrlFromPage(url);
+
+      if (scrape != null && scrape != "") {
+        matcher = urlRegex.matcher(scrape);
+
+        if (matcher.matches()) {
+          return new UrlInfo(scrape, matcher.group(1), "album".equals(matcher.group(2)));
+        }
+      }
+
       return null;
     }
   }
+    private String scrapeBandcampUrlFromPage(String url) {
+      /*
+                html = await response.text()
+                # Get the index of 'og:url"'
+                ind = html.index('og:url"')
+                # If found
+                if ind > -1:
+                    # Get the index of the closing tag
+                    end_ind = html.index(">", ind)
+                    if end_ind > -1:
+                        # Split '<meta property="og:url"' and 'content="<bandcamp url>">' using 're' library
+                        # and get the content side
+                        content = re.split(" +", html[ind:end_ind])[1]
+                        # Refine to get only the new bandcamp url
+                        bandcamp_url = content[content.index('"') + 1 : -1]
+      */
+
+/*
+    try (HttpInterface httpInterface = httpInterfaceManager.getInterface()) {
+      String responseText;
+
+      try (CloseableHttpResponse response = httpInterface.execute(new HttpGet(url))) {
+        int statusCode = response.getStatusLine().getStatusCode();
+
+        if (statusCode == HttpStatus.SC_NOT_FOUND) {
+          return null;
+        } else if (!HttpClientTools.isSuccessWithContent(statusCode)) {
+          throw new IOException("Invalid status code for track page: " + statusCode);
+        }
+
+        responseText = IOUtils.toString(response.getEntity().getContent(), StandardCharsets.UTF_8);
+
+        String urlInfoJson = DataFormatTools.extractBetween(responseText, "og:url\"", ">");
+
+        if (urlInfoJson == null) {
+          throw new FriendlyException("Bandcamp URL not found on the Bandcamp page.", SUSPICIOUS, null);
+        }
+
+        urlInfoJson = urlInfoJson.replace("&quot;", "\"");
+
+        JsonBrowser urlInfo = JsonBrowser.parse(urlInfoJson);
+        String bandcampUrl = urlInfo.get("content").safeText();
+
+        return bandcampUrl;
+      }
+    } catch (Exception e) {
+      throw ExceptionTools.wrapUnfriendlyExceptions("Loading information for a Bandcamp track failed.", FAULT, e);
+    }*/
+
+      return extractHtmlFromPage(urlInfo.fullUrl, (httpClient, text) -> {
+          String urlInfoJson = DataFormatTools.extractBetween(responseText, "og:url\"", ">");
+
+          if (urlInfoJson == null) {
+            throw new FriendlyException("Bandcamp URL not found on the Bandcamp page.", SUSPICIOUS, null);
+          }
+
+          urlInfoJson = urlInfoJson.replace("&quot;", "\"");
+
+          JsonBrowser urlInfo = JsonBrowser.parse(urlInfoJson);
+          String bandcampUrl = urlInfo.get("content").safeText();
+
+          return bandcampUrl;
+      });
+    }
 
   private AudioItem loadTrack(UrlInfo urlInfo) {
     return extractFromPage(urlInfo.fullUrl, (httpClient, text) -> {
@@ -141,6 +215,32 @@ public class BandcampAudioSourceManager implements AudioSourceManager, HttpConfi
 
     trackInfoJson = trackInfoJson.replace("&quot;", "\"");
     return JsonBrowser.parse(trackInfoJson);
+  }
+
+  private String extractHtmlFromPage(String url, StringExtractor extractor) {
+    try (HttpInterface httpInterface = httpInterfaceManager.getInterface()) {
+      return extractBandcampUrlFromPageWithInterface(httpInterface, url, extractor);
+    } catch (Exception e) {
+      throw ExceptionTools.wrapUnfriendlyExceptions("Loading information for a Bandcamp track failed.", FAULT, e);
+    }
+  }
+
+  private String extractHtmlFromPageWithInterface(HttpInterface httpInterface, String url, StringExtractor extractor) throws Exception {
+    String responseText;
+
+    try (CloseableHttpResponse response = httpInterface.execute(new HttpGet(url))) {
+      int statusCode = response.getStatusLine().getStatusCode();
+
+      if (statusCode == HttpStatus.SC_NOT_FOUND) {
+        return null;
+      } else if (!HttpClientTools.isSuccessWithContent(statusCode)) {
+        throw new IOException("Invalid status code for track page: " + statusCode);
+      }
+
+      responseText = IOUtils.toString(response.getEntity().getContent(), StandardCharsets.UTF_8);
+    }
+
+    return extractor.extract(httpInterface, responseText);
   }
 
   private AudioItem extractFromPage(String url, AudioItemExtractor extractor) {
@@ -223,6 +323,10 @@ public class BandcampAudioSourceManager implements AudioSourceManager, HttpConfi
 
   private interface AudioItemExtractor {
     AudioItem extract(HttpInterface httpInterface, String text) throws Exception;
+  }
+
+  private interface StringExtractor {
+    String extract(HttpInterface httpInterface, String text) throws Exception;
   }
 
   private static class UrlInfo {
